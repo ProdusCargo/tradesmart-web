@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TradeSmart Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#0e0e1a;color:#fff;min-height:100vh}
+#app{max-width:1200px;margin:0 auto;padding:16px}
+h1{font-size:20px;font-weight:bold;color:#fff;margin-bottom:4px}
+.subtitle{color:#aaa;font-size:12px;margin-bottom:16px}
+.tabs{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.tab{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:bold;background:#252535;color:#666;transition:all 0.15s}
+.tab.active{background:#1a3a5c;color:#fff;outline:1.5px solid #4fc3f7}
+.card{background:#1e1e2e;border-radius:10px;padding:16px;margin-bottom:16px}
+.section-title{font-size:13px;font-weight:bold;color:#4fc3f7;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center}
+.filters label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px}
+select{background:#252535;color:#fff;border:1px solid #333;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer}
+.breadcrumb{display:flex;align-items:center;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.bc-item{padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;border:none;transition:all 0.12s}
+.bc-item.current{background:#1a3a5c;color:#fff;font-weight:bold;cursor:default}
+.bc-item.prev{background:#252535;color:#aaa}
+.bc-item.prev:hover{background:#1a3a5c;color:#fff}
+.bc-sep{color:#444;font-size:14px}
+.drill-hint{color:#555;font-size:11px;margin-bottom:8px}
+.chart-wrap{position:relative;width:100%}
+.dual-charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:700px){.dual-charts{grid-template-columns:1fr}}
+.chart-label{font-size:12px;font-weight:bold;margin-bottom:8px;padding:6px 10px;border-radius:6px;display:inline-block}
+.valid-label{background:#1e3d1e;color:#2ecc71}
+.invalid-label{background:#3d1e1e;color:#e74c3c}
+#loading{text-align:center;padding:60px;color:#aaa}
+#error{text-align:center;padding:40px;color:#e74c3c;display:none}
+.legend{display:flex;gap:16px;margin-bottom:8px;flex-wrap:wrap}
+.leg-item{display:flex;align-items:center;gap:6px;font-size:11px;color:#aaa}
+.leg-dot{width:12px;height:12px;border-radius:2px;flex-shrink:0}
+</style>
+</head>
+<body>
+<div id="app">
+  <div style="background:#1a3a5c;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+    <div>
+      <h1>TradeSmart Dashboard</h1>
+      <div class="subtitle">MB Strategy · <span id="total-trades">...</span> trades · <span id="last-update">cargando...</span></div>
+    </div>
+    <button onclick="loadData()" style="background:#0d2137;border:1px solid #2a4a6a;color:#4fc3f7;padding:6px 14px;border-radius:7px;cursor:pointer;font-size:12px">Actualizar datos</button>
+  </div>
+
+  <div id="loading">Cargando datos desde Google Sheets...</div>
+  <div id="error">Error al cargar datos. Verifica que el script de Apps Script esté publicado correctamente.</div>
+
+  <div id="main" style="display:none">
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('drilldown')">Win Rate Drill-Down</button>
+      <button class="tab" onclick="showTab('disciplina')">Disciplina</button>
+      <button class="tab" onclick="showTab('trade')">Win Rate × Trade</button>
+    </div>
+
+    <!-- DRILL-DOWN TAB -->
+    <div id="tab-drilldown">
+      <div class="card">
+        <div class="section-title">Win Rate MB — Click en una barra para ver detalle</div>
+        <div class="breadcrumb" id="breadcrumb"></div>
+        <div class="drill-hint" id="drill-hint"></div>
+        <div class="dual-charts">
+          <div>
+            <div class="chart-label valid-label">VALID TRADES</div>
+            <div class="chart-wrap" style="height:320px"><canvas id="chartV" role="img" aria-label="Win rate válidos"></canvas></div>
+          </div>
+          <div>
+            <div class="chart-label invalid-label">INVALID TRADES</div>
+            <div class="chart-wrap" style="height:320px"><canvas id="chartI" role="img" aria-label="Win rate inválidos"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DISCIPLINA TAB -->
+    <div id="tab-disciplina" style="display:none">
+      <div class="card">
+        <div class="section-title">Disciplina % — Trades tomados sobre válidos</div>
+        <div class="legend">
+          <span class="leg-item"><span class="leg-dot" style="background:#f39c12"></span>Javier</span>
+          <span class="leg-item"><span class="leg-dot" style="background:#2980b9"></span>Iain</span>
+        </div>
+        <div class="chart-wrap" style="height:350px"><canvas id="chartDisc" role="img" aria-label="Disciplina mensual"></canvas></div>
+      </div>
+    </div>
+
+    <!-- TRADE TAB -->
+    <div id="tab-trade" style="display:none">
+      <div class="card">
+        <div class="section-title">Win Rate × Trade × Dirección</div>
+        <div class="filters">
+          <label>Mes:</label>
+          <select id="f-month" onchange="renderTrade()"><option value="all">Todos</option></select>
+          <label style="margin-left:8px">Dir:</label>
+          <select id="f-dir" onchange="renderTrade()">
+            <option value="all">Ambas</option>
+            <option value="LONG">LONG</option>
+            <option value="SHORT">SHORT</option>
+          </select>
+        </div>
+        <div class="dual-charts">
+          <div>
+            <div class="chart-label valid-label">VALID TRADES</div>
+            <div class="chart-wrap" style="height:360px"><canvas id="chartTV" role="img" aria-label="Win rate por trade válidos"></canvas></div>
+          </div>
+          <div>
+            <div class="chart-label invalid-label">INVALID TRADES</div>
+            <div class="chart-wrap" style="height:360px"><canvas id="chartTI" role="img" aria-label="Win rate por trade inválidos"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API_URL = "https://script.google.com/macros/s/AKfycbw2tGv86C4Q4QUpbBLtkc_WCS3f9jtFK0KqVWtNxDIZkC9F3zTBxjgWUK0jWxkYsxlXtQ/exec";
+const MO_MAP = {202501:"Jan 25",202502:"Feb 25",202503:"Mar 25",202504:"Apr 25",202505:"May 25",202506:"Jun 25",202507:"Jul 25",202508:"Aug 25",202509:"Sep 25",202510:"Oct 25",202511:"Nov 25",202512:"Dec 25",202601:"Jan 26",202602:"Feb 26",202603:"Mar 26",202604:"Apr 26",202605:"May 26"};
+const TRADES = ["EMT","15 M RE","TL","REVERSAL","REM","Continuation","50FIB-LEV"];
+const LONG_C = ["#1a5e34","#1e8449","#27ae60","#2ecc71","#58d68d","#a9dfbf"];
+const SHORT_C = ["#6e1207","#922b21","#c0392b","#e74c3c","#ec7063","#f1948a"];
+
+let RAW = [];
+let chartV_inst, chartI_inst, chartDisc_inst, chartTV_inst, chartTI_inst;
+
+// Drill-down state
+let drillPath = []; // [] = year, [yr] = month, [yr,mo] = trade, [yr,mo,tr] = direction
+
+function wr(w,l){ return (w+l)>0 ? Math.round(w/(w+l)*1000)/10 : null; }
+
+function stats(rows){
+  const vW=rows.filter(r=>r.VALID==='YES'&&r.MB_N===1).length;
+  const vL=rows.filter(r=>r.VALID==='YES'&&r.MB_N===-1).length;
+  const iW=rows.filter(r=>r.VALID==='NO'&&r.MB_N===1).length;
+  const iL=rows.filter(r=>r.VALID==='NO'&&r.MB_N===-1).length;
+  return {vW,vL,vN:vW+vL,vWR:wr(vW,vL),iW,iL,iN:iW+iL,iWR:wr(iW,iL)};
+}
+
+function getYears(rows){ return [...new Set(rows.map(r=>Math.floor(r.MONTH_CD/100)))].sort(); }
+function getMonths(rows,yr){ return [...new Set(rows.filter(r=>Math.floor(r.MONTH_CD/100)===yr).map(r=>r.MONTH_CD))].sort(); }
+function getTrades(rows){ return TRADES.filter(t=>rows.some(r=>r.TRADE===t)); }
+function getDirs(rows){ return [...new Set(rows.map(r=>r.DIRECTION))].filter(Boolean).sort(); }
+
+function getDrillRows(){
+  let rows = RAW;
+  if(drillPath.length>=1) rows = rows.filter(r=>Math.floor(r.MONTH_CD/100)===drillPath[0]);
+  if(drillPath.length>=2) rows = rows.filter(r=>r.MONTH_CD===drillPath[1]);
+  if(drillPath.length>=3) rows = rows.filter(r=>r.TRADE===drillPath[2]);
+  return rows;
+}
+
+function makeDrillData(){
+  const rows = getDrillRows();
+  if(drillPath.length===0){
+    const yrs = getYears(rows);
+    return yrs.map(yr=>{
+      const s=stats(rows.filter(r=>Math.floor(r.MONTH_CD/100)===yr));
+      return {label:String(yr),key:yr,s};
+    });
+  }
+  if(drillPath.length===1){
+    const mos = getMonths(rows, drillPath[0]);
+    return mos.map(mo=>{
+      const s=stats(rows.filter(r=>r.MONTH_CD===mo));
+      return {label:MO_MAP[mo]||String(mo),key:mo,s};
+    });
+  }
+  if(drillPath.length===2){
+    return getTrades(rows).map(tr=>{
+      const s=stats(rows.filter(r=>r.TRADE===tr));
+      return {label:tr,key:tr,s};
+    });
+  }
+  if(drillPath.length===3){
+    return getDirs(rows).map(dir=>{
+      const s=stats(rows.filter(r=>r.DIRECTION===dir));
+      const isLong=dir==='LONG';
+      return {label:dir,key:dir,s,color:isLong?'#27ae60':'#c0392b'};
+    });
+  }
+  return [];
+}
+
+function renderBreadcrumb(){
+  const bc = document.getElementById('breadcrumb');
+  const hint = document.getElementById('drill-hint');
+  const levels = ["Año","Mes","Trade","Dirección"];
+  const names = ["Todo",...drillPath.map((k,i)=>{
+    if(i===0) return String(k);
+    if(i===1) return MO_MAP[k]||String(k);
+    return String(k);
+  })];
+  bc.innerHTML = names.map((n,i)=>{
+    const isCurrent = i===names.length-1;
+    return `<button class="bc-item ${isCurrent?'current':'prev'}" onclick="goBack(${i})">${n}</button>`
+      + (isCurrent ? '' : '<span class="bc-sep">›</span>');
+  }).join('');
+  const nextLevel = levels[drillPath.length];
+  hint.textContent = drillPath.length<3 ? `Click en una barra para ver por ${nextLevel}` : 'Nivel máximo';
+}
+
+function renderDrill(){
+  const data = makeDrillData();
+  renderBreadcrumb();
+
+  const labels = data.map(d=>d.label);
+  const vWR = data.map(d=>d.s.vWR);
+  const iWR = data.map(d=>d.s.iWR);
+  const vN  = data.map(d=>d.s.vN);
+  const iN  = data.map(d=>d.s.iN);
+
+  const isDir = drillPath.length===3;
+  const vColors = isDir ? data.map(d=>d.color) : '#27ae60';
+  const iColors = isDir ? data.map(d=>d.color) : '#c0392b';
+
+  const makeWRLabel = (nArr) => ({
+    id:'topLabel',
+    afterDatasetsDraw(chart){
+      const {ctx}=chart;
+      chart.data.datasets[0].data.forEach((_,i)=>{
+        const meta=chart.getDatasetMeta(0);
+        const bar=meta.data[i];
+        if(!bar) return;
+        ctx.save();
+        ctx.fillStyle='#aaa';
+        ctx.font='bold 10px Arial';
+        ctx.textAlign='center';
+        const n=nArr[i];
+        if(n) ctx.fillText(n, bar.x, bar.y-4);
+        ctx.restore();
+      });
+    }
+  });
+
+  const clickHandler = (e,els,chart)=>{
+    if(!els.length||drillPath.length>=3) return;
+    const idx=els[0].index;
+    drillPath.push(data[idx].key);
+    renderDrill();
+  };
+
+  const opts = (nArr,isValid)=>({
+    responsive:true, maintainAspectRatio:false,
+    onClick:clickHandler,
+    plugins:{legend:{display:false},tooltip:{callbacks:{
+      label:(ctx)=>`WR: ${ctx.parsed.y??'-'}% (${nArr[ctx.dataIndex]} trades)`
+    }}},
+    scales:{
+      x:{ticks:{color:'#ccc',font:{size:10}},grid:{color:'#1a1a2e'}},
+      y:{min:0,max:100,ticks:{color:'#aaa',font:{size:10},callback:v=>v+'%'},
+         grid:{color:'#1a1a2e'},
+         title:{display:true,text:'Win Rate %',color:'#555',font:{size:10}}}
+    }
+  });
+
+  if(chartV_inst){chartV_inst.destroy();}
+  chartV_inst=new Chart(document.getElementById('chartV'),{
+    type:'bar',
+    data:{labels,datasets:[{data:vWR,backgroundColor:vColors,borderRadius:4,maxBarThickness:50}]},
+    options:opts(vN,true),
+    plugins:[{
+      id:'ref70',
+      afterDraw(chart){
+        const {ctx,scales:{y}}=chart;
+        const yPos=y.getPixelForValue(70);
+        ctx.save();ctx.beginPath();
+        ctx.setLineDash([6,3]);ctx.strokeStyle='#f39c12';ctx.lineWidth=1.5;
+        ctx.moveTo(chart.chartArea.left,yPos);ctx.lineTo(chart.chartArea.right,yPos);
+        ctx.stroke();ctx.restore();
+      }
+    },makeWRLabel(vN)]
+  });
+
+  if(chartI_inst){chartI_inst.destroy();}
+  chartI_inst=new Chart(document.getElementById('chartI'),{
+    type:'bar',
+    data:{labels,datasets:[{data:iWR,backgroundColor:iColors,borderRadius:4,maxBarThickness:50}]},
+    options:opts(iN,false),
+    plugins:[{
+      id:'ref70',
+      afterDraw(chart){
+        const {ctx,scales:{y}}=chart;
+        const yPos=y.getPixelForValue(70);
+        ctx.save();ctx.beginPath();
+        ctx.setLineDash([6,3]);ctx.strokeStyle='#f39c12';ctx.lineWidth=1.5;
+        ctx.moveTo(chart.chartArea.left,yPos);ctx.lineTo(chart.chartArea.right,yPos);
+        ctx.stroke();ctx.restore();
+      }
+    },makeWRLabel(iN)]
+  });
+}
+
+function goBack(idx){
+  if(idx===0){drillPath=[];}
+  else {drillPath=drillPath.slice(0,idx);}
+  renderDrill();
+}
+
+function renderDisc(){
+  const months=Object.keys(MO_MAP).map(Number);
+  const labels=months.map(m=>MO_MAP[m]);
+  const javArr=[], iainArr=[];
+  months.forEach(mo=>{
+    const rows=RAW.filter(r=>r.MONTH_CD===mo&&r.VALID==='YES');
+    const total=rows.length;
+    javArr.push(total>0?Math.round(rows.filter(r=>r.JAVIER===1).length/total*1000)/10:null);
+    iainArr.push(total>0?Math.round(rows.filter(r=>r.IAIN===1).length/total*1000)/10:null);
+  });
+  if(chartDisc_inst) chartDisc_inst.destroy();
+  chartDisc_inst=new Chart(document.getElementById('chartDisc'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {label:'Javier',data:javArr,backgroundColor:'#f39c12',borderRadius:3,maxBarThickness:30},
+      {label:'Iain',data:iainArr,backgroundColor:'#2980b9',borderRadius:3,maxBarThickness:30}
+    ]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.parsed.y??0}%`}}},
+      scales:{
+        x:{ticks:{color:'#ccc',font:{size:10},maxRotation:45},grid:{color:'#1a1a2e'}},
+        y:{min:0,max:100,ticks:{color:'#aaa',callback:v=>v+'%'},grid:{color:'#1a1a2e'}}
+      }
+    }
+  });
+}
+
+function renderTrade(){
+  const mo = document.getElementById('f-month').value;
+  const dir = document.getElementById('f-dir').value;
+  let rows = RAW;
+  if(mo!=='all') rows=rows.filter(r=>r.MONTH_CD===Number(mo));
+  if(dir!=='all') rows=rows.filter(r=>r.DIRECTION===dir);
+
+  const dirs = dir==='all' ? ['LONG','SHORT'] : [dir];
+  const labels=[], vWR=[], iWR=[], vN=[], iN=[];
+
+  TRADES.forEach(tr=>{
+    dirs.forEach((d,di)=>{
+      const s=stats(rows.filter(r=>r.TRADE===tr&&r.DIRECTION===d));
+      if(s.vN===0&&s.iN===0) return;
+      labels.push(`${tr.length>8?tr.slice(0,7)+'…':tr}\n${d==='LONG'?'L':'S'}`);
+      vWR.push(s.vWR); iWR.push(s.iWR);
+      vN.push(s.vN);   iN.push(s.iN);
+    });
+  });
+
+  const vBG = labels.map(l=>l.includes('\nL')?'#27ae60':'#c0392b');
+  const iBG = labels.map(l=>l.includes('\nL')?'#1a5e34':'#6e1207');
+
+  const makePlugin=(nArr)=>({
+    id:'nLabel',
+    afterDatasetsDraw(chart){
+      const {ctx}=chart;
+      const meta=chart.getDatasetMeta(0);
+      meta.data.forEach((bar,i)=>{
+        ctx.save();ctx.fillStyle='#aaa';ctx.font='bold 9px Arial';ctx.textAlign='center';
+        if(nArr[i]) ctx.fillText(nArr[i],bar.x,bar.y-4);
+        ctx.restore();
+      });
+    }
+  });
+
+  const ref70={id:'ref70',afterDraw(chart){
+    const{ctx,scales:{y}}=chart;
+    const yPos=y.getPixelForValue(70);
+    ctx.save();ctx.beginPath();ctx.setLineDash([6,3]);
+    ctx.strokeStyle='#f39c12';ctx.lineWidth=1.5;
+    ctx.moveTo(chart.chartArea.left,yPos);ctx.lineTo(chart.chartArea.right,yPos);
+    ctx.stroke();ctx.restore();
+  }};
+
+  const wrapH=Math.max(300,labels.length*30+80);
+  document.getElementById('chartTV').parentElement.style.height=wrapH+'px';
+  document.getElementById('chartTI').parentElement.style.height=wrapH+'px';
+
+  if(chartTV_inst) chartTV_inst.destroy();
+  chartTV_inst=new Chart(document.getElementById('chartTV'),{
+    type:'bar',
+    data:{labels,datasets:[{data:vWR,backgroundColor:vBG,borderRadius:3,maxBarThickness:30}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`WR: ${ctx.parsed.y??'-'}% (${vN[ctx.dataIndex]} trades)`}}},
+      scales:{x:{ticks:{color:'#ccc',font:{size:9}},grid:{color:'#1a1a2e'}},
+              y:{min:0,max:100,ticks:{color:'#aaa',callback:v=>v+'%'},grid:{color:'#1a1a2e'}}}},
+    plugins:[ref70,makePlugin(vN)]
+  });
+
+  if(chartTI_inst) chartTI_inst.destroy();
+  chartTI_inst=new Chart(document.getElementById('chartTI'),{
+    type:'bar',
+    data:{labels,datasets:[{data:iWR,backgroundColor:iBG,borderRadius:3,maxBarThickness:30}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`WR: ${ctx.parsed.y??'-'}% (${iN[ctx.dataIndex]} trades)`}}},
+      scales:{x:{ticks:{color:'#ccc',font:{size:9}},grid:{color:'#1a1a2e'}},
+              y:{min:0,max:100,ticks:{color:'#aaa',callback:v=>v+'%'},grid:{color:'#1a1a2e'}}}},
+    plugins:[ref70,makePlugin(iN)]
+  });
+}
+
+function populateMonthFilter(){
+  const sel = document.getElementById('f-month');
+  sel.innerHTML='<option value="all">Todos</option>';
+  Object.entries(MO_MAP).forEach(([code,label])=>{
+    if(RAW.some(r=>r.MONTH_CD===Number(code))){
+      sel.innerHTML+=`<option value="${code}">${label}</option>`;
+    }
+  });
+}
+
+async function loadData(){
+  document.getElementById('loading').style.display='block';
+  document.getElementById('main').style.display='none';
+  document.getElementById('error').style.display='none';
+  try{
+    const res = await fetch(API_URL);
+    const json = await res.json();
+    RAW = json.map(r=>({
+      ...r,
+      MB_N: Number(r.MB_N)||0,
+      MONTH_CD: Number(r.MONTH_CD)||0,
+      JAVIER: Number(r.JAVIER)||0,
+      IAIN: Number(r.IAIN)||0,
+    })).filter(r=>r.MONTH_CD>0&&r.TRADE);
+
+    document.getElementById('total-trades').textContent=RAW.length+' trades';
+    document.getElementById('last-update').textContent='actualizado '+new Date().toLocaleTimeString();
+    document.getElementById('loading').style.display='none';
+    document.getElementById('main').style.display='block';
+    populateMonthFilter();
+    drillPath=[];
+    renderDrill();
+    renderDisc();
+    renderTrade();
+  }catch(e){
+    document.getElementById('loading').style.display='none';
+    document.getElementById('error').style.display='block';
+    document.getElementById('error').textContent='Error: '+e.message+'. Verifica que el script esté publicado como "Cualquier persona".';
+  }
+}
+
+function showTab(tab){
+  ['drilldown','disciplina','trade'].forEach(t=>{
+    document.getElementById('tab-'+t).style.display=t===tab?'block':'none';
+  });
+  document.querySelectorAll('.tab').forEach((b,i)=>{
+    b.classList.toggle('active',['drilldown','disciplina','trade'][i]===tab);
+  });
+}
+
+loadData();
+</script>
+</body>
+</html>
